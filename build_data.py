@@ -10,6 +10,8 @@ Uso:  python build_data.py --n 100 --out site            (dados reais)
       python build_data.py --n 100 --out site --demo     (dados SIMULADOS, sem internet)
 """
 import argparse
+import logging
+import warnings
 import json
 import os
 import sys
@@ -18,6 +20,12 @@ from datetime import datetime, timedelta, timezone
 
 import data
 import smc
+
+warnings.filterwarnings("ignore")
+logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+
+
+FALLBACK_SET = set(data.FALLBACK_TICKERS)
 
 
 def dump(path: str, obj) -> None:
@@ -42,10 +50,11 @@ def main() -> int:
     if args.demo:
         tickers, source = data.demo_universe(args.n), "demo"
     else:
-        tickers, source = data.get_universe(args.n)
-    print(f"Universo: {len(tickers)} ativos ({source})")
+        tickers, source = data.get_universe(int(args.n * 1.5))
+    print(f"Candidatos: {len(tickers)} ({source}); serão mantidos os {args.n} de maior volume financeiro real")
 
     scans = {"1d": [], "1wk": []}
+    analises, liq = {}, {}
     failed = []
     for b in range(0, len(tickers), args.batch):
         chunk = tickers[b:b + args.batch]
@@ -67,6 +76,7 @@ def main() -> int:
                     print("  ... (demais falhas omitidas; o motivo costuma ser o mesmo)")
                 continue
             try:
+                liq[t] = float((df["Close"] * df["Volume"]).tail(60).mean())
                 wk = data.to_weekly(df)
                 a_d = smc.analyze(df, "1d", htf_df=wk, ticker=t)
                 a_w = smc.analyze(wk, "1wk", htf_df=None, ticker=t)
@@ -74,11 +84,15 @@ def main() -> int:
                 failed.append(t)
                 print(f"  {t:<7} erro na análise: {e}")
                 continue
-            for tf, a in (("1d", a_d), ("1wk", a_w)):
-                dump(os.path.join(out, f"{t}_{tf}.json"), a)
-                scans[tf].append(smc.summary(a))
+            analises[t] = (a_d, a_w)
             print(f"  {t:<7} {a_d['direction_label']:<7} score {a_d['score']:>3}  {a_d['state']}")
         time.sleep(0.5)
+
+    ranking = sorted(analises, key=lambda t: -liq.get(t, 0))[:args.n]     # as N mais líquidas de verdade
+    for t in ranking:
+        for tf, a in zip(("1d", "1wk"), analises[t]):
+            dump(os.path.join(out, f"{t}_{tf}.json"), a)
+            scans[tf].append(smc.summary(a))
 
     if not scans["1d"]:
         print("\nERRO: nenhum ativo foi analisado, então NENHUM dado foi gravado.")
@@ -90,8 +104,8 @@ def main() -> int:
         print("      Para só ver o app funcionando, use os dados simulados:  python build_data.py --n 30 --out site --demo")
         return 1
 
-    if not args.demo and len(scans["1d"]) < args.min_ratio * len(tickers):
-        print(f"ERRO: só {len(scans['1d'])}/{len(tickers)} ativos analisados (Yahoo instável?) — não publicar.")
+    if not args.demo and len(scans["1d"]) < args.min_ratio * args.n:
+        print(f"ERRO: só {len(scans['1d'])}/{args.n} ativos analisados (Yahoo instável?) — não publicar.")
         return 1
 
     for tf in scans:
@@ -103,7 +117,7 @@ def main() -> int:
         "updated_at": now.isoformat(timespec="seconds"),
         "updated_brt": (now - timedelta(hours=3)).strftime("%d/%m/%Y %H:%M"),
         "source": source, "demo": bool(args.demo),
-        "requested": len(tickers), "analyzed": len(scans["1d"]), "failed": failed,
+        "requested": args.n, "analyzed": len(scans["1d"]), "failed": [t for t in failed if t in FALLBACK_SET][:20],
         "seconds": round(time.time() - t0, 1),
     })
     print(f"Concluído: {len(scans['1d'])} ativos em {time.time() - t0:.0f}s ({len(failed)} falhas).")

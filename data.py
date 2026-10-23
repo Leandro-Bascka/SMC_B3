@@ -44,27 +44,40 @@ def _clean_ohlcv(d: pd.DataFrame | None, min_bars: int) -> pd.DataFrame | None:
     return d if len(d) >= min_bars else None
 
 
+def _num_br(x) -> float:
+    """'1.234.567,89' -> 1234567.89 (tolera número já convertido)."""
+    if isinstance(x, (int, float)):
+        return float(x)
+    t = str(x).strip().replace(".", "").replace(",", ".")
+    try:
+        return float(t)
+    except ValueError:
+        return float("nan")
+
+
 def get_universe(n: int = 100) -> tuple[list[str], str]:
-    """Retorna (tickers, fonte). Mesma lógica do código original: maior liquidez 2 meses no Fundamentus."""
+    """Retorna (candidatos, fonte): os n com maior liquidez no Fundamentus + a lista de reserva (blue chips).
+    O build_data.py baixa todos e FICA com os n de maior volume financeiro real (candidatos sem dados são ignorados)."""
     import requests
     try:
         r = requests.get("https://www.fundamentus.com.br/resultado.php", headers=HEADERS, timeout=30)
         r.raise_for_status()
-        df = pd.read_html(StringIO(r.text), decimal=",", thousands=".")[0]
+        df = pd.read_html(StringIO(r.text), decimal=",", thousands=".", converters=None)[0]
         col_liq = next(c for c in df.columns if "liq" in str(c).lower())
         col_papel = next(c for c in df.columns if str(c).lower() == "papel")
         df = df[[col_papel, col_liq]].copy()
         df.columns = ["ticker", "liq"]
-        df["liq"] = pd.to_numeric(df["liq"], errors="coerce")
+        df["liq"] = df["liq"].map(_num_br)
         df = df.dropna()
         df = df[(df["liq"] > 0) & df["ticker"].astype(str).str.match(r"^[A-Z]{4}\d{1,2}$")]
         df = df.sort_values("liq", ascending=False).head(n)
         if len(df) < 20:
             raise ValueError("poucos ativos")
-        return [str(t).strip().upper() for t in df["ticker"]], "fundamentus"
+        lista = [str(t).strip().upper() for t in df["ticker"]]
+        return list(dict.fromkeys(lista + FALLBACK_TICKERS)), "fundamentus"
     except Exception as e:  # noqa: BLE001
         print(f"[aviso] Fundamentus indisponível ({e}); usando lista de reserva.")
-        return FALLBACK_TICKERS[:n], "reserva"
+        return FALLBACK_TICKERS[:max(n, 60)], "reserva"
 
 
 LAST_ERRORS: dict[str, str] = {}      # motivo da última falha por ativo (mostrado pelo build_data.py)
