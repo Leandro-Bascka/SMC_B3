@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0e13">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Smc_B3">
+<title>Smc_B3 · Scanner SMC</title>
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+:root{
+  --bg:#0b0e13; --panel:#11161d; --panel2:#151b24; --line:#1f2733; --txt:#d9e0ea; --mut:#8793a4;
+  --up:#26c281; --dn:#ef5350; --amb:#f5a524; --acc:#4da3ff;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--txt);font:14px/1.45 var(--sans)}
+button{font:inherit;color:inherit;cursor:pointer}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.up{color:var(--up)} .dn{color:var(--dn)} .mut{color:var(--mut)} .amb{color:var(--amb)}
+
+/* ---------- topo ---------- */
+header{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel);height:56px;padding-top:max(10px,env(safe-area-inset-top))}
+.logo{font-weight:800;letter-spacing:.04em;font-size:15px;white-space:nowrap}
+.logo b{color:var(--acc)}
+.logo .lg2{color:var(--mut);font-weight:600;letter-spacing:0}
+@media (max-width:600px){.logo .lg2{display:none}}
+.meta{color:var(--mut);font-size:12px;line-height:1.25;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.meta .num{color:var(--txt)}
+.sp{flex:1}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:transparent;border:0;padding:6px 11px;color:var(--mut);font-size:13px}
+.seg button.on{background:var(--panel2);color:var(--txt);box-shadow:inset 0 -2px 0 var(--acc)}
+.banner{background:#3a2a05;color:#ffd27a;text-align:center;font-size:12px;padding:5px 10px;border-bottom:1px solid #5a4210}
+.banner.err{background:#3a1212;color:#ffb4b4;border-color:#5a2020}
+.toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);
+  padding:8px 14px;border-radius:999px;font-size:13px;z-index:30;box-shadow:0 6px 24px #0008}
+
+/* ---------- layout ---------- */
+.app{display:grid;grid-template-columns:minmax(330px,400px) 1fr;height:calc(100% - 56px);min-height:0}
+.app.hasbanner{height:calc(100% - 56px - 28px)}
+#listpane{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;background:var(--panel)}
+#detail{overflow:auto;min-height:0}
+.filters{padding:10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+.filters input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:8px 10px;font:inherit}
+.filters .seg{display:flex}.filters .seg button{flex:1;padding:6px 4px}
+#rows{overflow:auto;flex:1;min-height:0}
+.row{display:grid;grid-template-columns:62px 1fr auto;grid-template-areas:"tk dir px" "tk st sc";gap:1px 10px;width:100%;text-align:left;
+  background:transparent;border:0;border-bottom:1px solid var(--line);padding:9px 12px;align-items:center}
+.row:hover{background:var(--panel2)} .row.sel{background:#16202e;box-shadow:inset 3px 0 0 var(--acc)}
+.row .tk{grid-area:tk;font-weight:700;font-family:var(--mono);font-size:14px}
+.row .dir{grid-area:dir;font-size:12px;font-weight:700;letter-spacing:.03em}
+.row .px{grid-area:px;text-align:right;font-size:13px}
+.row .st{grid-area:st;font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .st.zone{color:var(--amb);font-weight:700}
+.row .sc{grid-area:sc;display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.row .sc i{display:block;height:5px;border-radius:3px;background:var(--acc);width:48px;position:relative;background:#243044;overflow:hidden}
+.row .sc i s{position:absolute;inset:0 auto 0 0;background:var(--acc);display:block}
+.row .sc b{font-family:var(--mono);font-size:13px;min-width:22px;text-align:right}
+.empty{padding:28px 18px;color:var(--mut);text-align:center}
+
+.symhead{display:flex;align-items:center;gap:12px;padding:12px 14px;flex-wrap:wrap}
+.symhead .t{font:800 22px var(--mono);letter-spacing:.02em}
+.symhead .p{font:600 18px var(--mono)}
+.badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:12px;font-weight:800;letter-spacing:.04em}
+.badge.buy{background:#10392a;color:var(--up)} .badge.sell{background:#3d1a1a;color:var(--dn)} .badge.neu{background:#232a35;color:var(--mut)}
+.ring{--v:0;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font:700 14px var(--mono);
+  background:conic-gradient(var(--c,var(--acc)) calc(var(--v)*1%),#243044 0)}
+.ring span{width:36px;height:36px;border-radius:50%;background:var(--bg);display:grid;place-items:center}
+.layers{display:flex;gap:6px;padding:0 14px 8px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:transparent;border-radius:999px;padding:3px 10px;font-size:12px;color:var(--mut);display:inline-flex;align-items:center;gap:6px}
+.chip i{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--c)}
+.chip.on{color:var(--txt);background:var(--panel2);border-color:#2b3646}
+.chip:not(.on) i{opacity:.3}
+#chartpane{height:clamp(380px,60vh,760px);display:flex;flex-direction:column;border-bottom:1px solid var(--line)}
+#chartwrap{flex:1;position:relative;min-height:0}
+#chart{position:absolute;inset:0}
+#ov{position:absolute;inset:0;pointer-events:none;width:100%;height:100%}
+
+#planpane{padding:14px;display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h3{margin:0 0 10px;font-size:12px;letter-spacing:.09em;color:var(--mut);text-transform:uppercase;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#232a35;color:var(--txt);letter-spacing:0;text-transform:none;font-weight:700}
+.pill.zone{background:#4a3306;color:var(--amb)} .pill.bad{background:#3d1a1a;color:var(--dn)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0}
+.kv dt{color:var(--mut)} .kv dd{margin:0;text-align:right;font-family:var(--mono)}
+.kv dd small{color:var(--mut);font-family:var(--sans)}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tag{font-size:11.5px;padding:2px 8px;border-radius:6px;background:#1b2330;color:var(--mut)} .tag.on{color:var(--txt);background:#1c3250}
+ul.ins{margin:0;padding:0;list-style:none;display:grid;gap:8px}
+ul.ins li{padding-left:14px;position:relative;color:#c3ccd9} ul.ins li:before{content:"";position:absolute;left:0;top:8px;width:6px;height:6px;border-radius:2px;background:var(--acc)}
+ul.ins li.warn:before{background:var(--amb)}
+.bd{display:grid;gap:7px}
+.bd div{display:grid;grid-template-columns:150px 1fr 44px;gap:8px;align-items:center;font-size:12.5px}
+.bd .bar{height:6px;background:#243044;border-radius:3px;overflow:hidden}.bd .bar s{display:block;height:100%;background:var(--acc)}
+.bd span:last-child{text-align:right;font-family:var(--mono);color:var(--mut)}
+.calc{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+.calc label{font-size:11.5px;color:var(--mut);display:grid;gap:3px}
+.calc input{background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:7px 9px;font:inherit;font-family:var(--mono);width:100%}
+.disc{color:var(--mut);font-size:11.5px;padding:0 14px 90px;max-width:900px}
+
+nav.tabs{display:none}
+@media (max-width:900px){
+  .app{grid-template-columns:1fr;height:calc(100% - 56px - 54px - env(safe-area-inset-bottom))}
+  .app.hasbanner{height:calc(100% - 56px - 28px - 54px - env(safe-area-inset-bottom))}
+  #listpane{border-right:0}
+  .app[data-pane="list"] #detail{display:none}
+  .app[data-pane="chart"] #listpane,.app[data-pane="plan"] #listpane{display:none}
+  .app[data-pane="chart"] #planpane,.app[data-pane="chart"] .disc{display:none}
+  .app[data-pane="plan"] #chartpane,.app[data-pane="plan"] .layers{display:none}
+  #chartpane{height:calc(100% - 118px);min-height:320px}
+  nav.tabs{display:grid;grid-template-columns:repeat(3,1fr);position:fixed;left:0;right:0;bottom:0;background:var(--panel);
+    border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom);z-index:20}
+  nav.tabs button{background:transparent;border:0;padding:10px 4px 9px;color:var(--mut);font-size:12.5px;display:grid;gap:2px;justify-items:center}
+  nav.tabs button b{font-size:17px;line-height:1}
+  nav.tabs button.on{color:var(--txt);box-shadow:inset 0 2px 0 var(--acc)}
+  .meta .full{display:none} .toast{bottom:80px}
+  .bd div{grid-template-columns:120px 1fr 40px}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">SMC<b>·</b>B3</div>
+  <div class="meta" id="meta">carregando…</div>
+  <div class="sp"></div>
+  <div class="seg" id="tfseg"><button data-tf="1d" class="on">Diário</button><button data-tf="1wk">Semanal</button></div>
+</header>
+<div id="banner" hidden></div>
+
+<div class="app" id="app" data-pane="list">
+  <aside id="listpane">
+    <div class="filters">
+      <input id="q" type="search" placeholder="Buscar ativo (ex.: PETR4)" autocomplete="off" autocapitalize="characters">
+      <div class="seg" id="fseg">
+        <button data-f="all" class="on">Todos</button><button data-f="buy">Compra</button>
+        <button data-f="sell">Venda</button><button data-f="zone">Em zona</button>
+      </div>
+    </div>
+    <div id="rows"></div>
+  </aside>
+
+  <main id="detail">
+    <div id="empty" class="empty">Selecione um ativo no ranking.</div>
+    <div id="dbody" hidden>
+      <div class="symhead">
+        <span class="t" id="sTk"></span><span class="p" id="sPx"></span><span class="num" id="sCh"></span>
+        <span class="badge" id="sDir"></span><span class="sp"></span>
+        <div class="ring" id="sRing"><span id="sScore"></span></div>
+      </div>
+      <div class="layers" id="layers"></div>
+      <section id="chartpane"><div id="chartwrap"><div id="chart"></div><canvas id="ov"></canvas></div></section>
+      <section id="planpane"></section>
+      <p class="disc">Ferramenta educacional baseada no conceito Smart Money (SMC). Os níveis são calculados por regras
+      automáticas sobre candles do Yahoo Finance (podem ter atraso) e <b>não constituem recomendação de investimento</b>.
+      SMC não tem comprovação estatística robusta; use sempre stop e gerencie o risco.</p>
+    </div>
+  </main>
+</div>
+
+<nav class="tabs" id="tabs">
+  <button data-p="list" class="on"><b>☰</b>Ranking</button>
+  <button data-p="chart"><b>◢</b>Gráfico</button>
+  <button data-p="plan"><b>◎</b>Plano</button>
+</nav>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+"use strict";
+/* ============================== util ============================== */
+const $ = s => document.querySelector(s);
+const nf = new Intl.NumberFormat('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const fmt = v => (v == null ? '—' : nf.format(v));
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('smc.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem('smc.' + k, JSON.stringify(v)); } catch (e) {} }
+};
+const C = {up:'#26c281', dn:'#ef5350', amb:'#f5a524', acc:'#4da3ff', mut:'#8793a4'};
+const S = {tf: store.get('tf', '1d'), view: 'smc', bn: null, filter: 'all', q: '', rows: [], sel: null, a: null, meta: null, ver: '',
+           layers: Object.assign({estrutura:true, ob:true, fvg:true, liq:true, sr:false, plano:true, emas:true}, store.get('layers', {}))};
+const mobile = () => matchMedia('(max-width: 900px)').matches;
+
+async function getJSON(path, bust) {
+  const url = 'data/' + path + (bust ? '?v=' + encodeURIComponent(bust) : '');
+  const r = await fetch(url, bust ? {} : {cache: 'no-store'});
+  if (!r.ok) throw new Error(path + ' → HTTP ' + r.status);
+  return r.json();
+}
+function toast(msg) {
+  const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+function banner(html, err) { S.bn = {html, err}; applyBanner(); }
+function applyBanner() {
+  const bn = S.bn || {}, show = !!bn.html, b = $('#banner');
+  b.hidden = !show; b.className = 'banner' + (bn.err ? ' err' : ''); b.innerHTML = show ? bn.html : '';
+  $('#app').classList.toggle('hasbanner', show);
+}
+
+/* ============================== ranking ============================== */
+function stateInfo(r) {
+  if (r.state === 'em_zona') return {txt: 'EM ZONA · ' + (r.direction === 1 ? 'comprar' : 'vender'), cls: 'zone'};
+  if (r.state === 'invalidado') return {txt: 'Invalidado', cls: ''};
+  if (r.state === 'aguardar') return {txt: r.state_txt.replace('AGUARDAR ', 'Aguardar ').toLowerCase().replace(/^./, c => c.toUpperCase()), cls: ''};
+  return {txt: 'Sem zona válida', cls: ''};
+}
+function renderRows() {
+  const q = S.q.trim().toUpperCase();
+  let rows = S.rows.filter(r => {
+    if (q && !r.ticker.includes(q)) return false;
+    if (S.filter === 'buy') return r.direction === 1;
+    if (S.filter === 'sell') return r.direction === -1;
+    if (S.filter === 'zone') return r.state === 'em_zona';
+    return true;
+  });
+  const el = $('#rows');
+  if (!rows.length) { el.innerHTML = '<div class="empty">Nenhum ativo neste filtro.</div>'; return; }
+  el.innerHTML = rows.map(r => {
+    const si = stateInfo(r), d = r.direction;
+    const dir = d === 1 ? '<span class="dir up">▲ COMPRA</span>' : d === -1 ? '<span class="dir dn">▼ VENDA</span>' : '<span class="dir mut">● NEUTRO</span>';
+    return `<button class="row${S.sel === r.ticker ? ' sel' : ''}" data-t="${r.ticker}">
+      <span class="tk">${r.ticker}</span>${dir}
+      <span class="px num">${fmt(r.price)} <small class="${r.change_pct >= 0 ? 'up' : 'dn'}">${r.change_pct >= 0 ? '+' : ''}${fmt(r.change_pct)}%</small></span>
+      <span class="st ${si.cls}">${si.txt}</span>
+      <span class="sc"><i><s style="width:${r.score}%"></s></i><b>${r.score}</b></span></button>`;
+  }).join('');
+}
+
+/* ============================== gráfico ============================== */
+let chart = null, series = null, volS = null, e50 = null, e200 = null, priceLines = [], raf = 0;
+const wrap = () => $('#chartwrap');
+
+function initChart() {
+  if (chart) return;
+  chart = LightweightCharts.createChart($('#chart'), {
+    layout: {background: {type: 'solid', color: 'transparent'}, textColor: '#8793a4', fontSize: 11},
+    grid: {vertLines: {color: 'rgba(255,255,255,.035)'}, horzLines: {color: 'rgba(255,255,255,.035)'}},
+    rightPriceScale: {borderColor: '#1f2733', scaleMargins: {top: .06, bottom: .2}},
+    timeScale: {borderColor: '#1f2733', rightOffset: 10, timeVisible: true, secondsVisible: false},
+    crosshair: {mode: 0},
+    localization: {priceFormatter: p => nf.format(p)}
+  });
+  series = chart.addCandlestickSeries({upColor: C.up, downColor: C.dn, borderVisible: false, wickUpColor: C.up, wickDownColor: C.dn});
+  volS = chart.addHistogramSeries({priceFormat: {type: 'volume'}, priceScaleId: 'vol', lastValueVisible: false, priceLineVisible: false});
+  chart.priceScale('vol').applyOptions({scaleMargins: {top: .85, bottom: 0}});
+  e50 = chart.addLineSeries({color: '#4da3ff', lineWidth: 1, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false});
+  e200 = chart.addLineSeries({color: '#b388ff', lineWidth: 2, lastValueVisible: false, priceLineVisible: false, crosshairMarkerVisible: false});
+  chart.timeScale().subscribeVisibleLogicalRangeChange(sched);
+  chart.subscribeCrosshairMove(sched);
+  const w = wrap();
+  ['pointermove', 'wheel', 'touchmove', 'pointerup'].forEach(ev => w.addEventListener(ev, sched, {passive: true}));
+  new ResizeObserver(fit).observe(w);
+}
+function fit() {
+  if (!chart) return;
+  const w = wrap(), W = w.clientWidth, H = w.clientHeight;
+  if (W > 0 && H > 0) { chart.applyOptions({width: W, height: H}); sched(); }
+}
+function sched() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); }
+
+function setChartData(a) {
+  initChart();
+  series.setData(a.candles.map(c => ({time: c.time, open: c.open, high: c.high, low: c.low, close: c.close})));
+  volS.setData(a.candles.map(c => ({time: c.time, value: c.volume, color: c.close >= c.open ? 'rgba(38,194,129,.35)' : 'rgba(239,83,80,.35)'})));
+  e50.setData(a.ema50); e200.setData(a.ema200);
+  e50.applyOptions({visible: S.layers.emas}); e200.applyOptions({visible: S.layers.emas});
+  priceLines.forEach(l => series.removePriceLine(l)); priceLines = [];
+  const p = a.plan;
+  if (p && S.layers.plano) {
+    const add = (price, color, title, style) => priceLines.push(series.createPriceLine({price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title}));
+    add(p.entry, C.acc, 'ENTRADA', 0);
+    add(p.sl, C.dn, 'STOP', 0);
+    p.tps.forEach((t, i) => add(t.level, C.up, 'ALVO ' + (i + 1), 2));
+  }
+  const n = a.candles.length;
+  chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (mobile() ? 70 : 130)), to: n + 8});
+  fit();
+}
+
+/* --- camada de desenho SMC sobre o gráfico --- */
+function draw() {
+  const cv = $('#ov'), a = S.a;
+  if (!cv || !chart) return;
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  if (!a || !W) return;
+  const ts = chart.timeScale(), L = S.layers;
+  let right = W; try { right = W - chart.priceScale('right').width(); } catch (e) {}
+  const X = t => { if (t == null) return null; const x = ts.timeToCoordinate(t); return x == null ? null : x; };
+  const Y = p => series.priceToCoordinate(p);
+  g.font = '600 10.5px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+  g.textBaseline = 'middle';
+
+  const rgba = (hex, al) => { const n = parseInt(hex.slice(1), 16); return `rgba(${n >> 16},${n >> 8 & 255},${n & 255},${al})`; };
+  const zone = (t0, top, bot, col, label, o = {}) => {
+    const x0 = Math.max(0, X(t0) == null ? 0 : X(t0)), yt = Y(top), yb = Y(bot);
+    if (yt == null || yb == null || x0 > right) return;
+    const h = Math.max(2, yb - yt);
+    g.fillStyle = rgba(col, o.fill || .15); g.fillRect(x0, yt, right - x0, h);
+    g.strokeStyle = rgba(col, o.line || .75); g.lineWidth = o.w || 1; g.setLineDash(o.dash || []);
+    g.strokeRect(x0 + .5, yt + .5, right - x0 - 1, h - 1); g.setLineDash([]);
+    if (label) { g.fillStyle = rgba(col, 1); g.textAlign = 'left'; g.fillText(label, x0 + 5, yt + Math.min(h / 2, 8) + 1); }
+  };
+  const hline = (t0, t1, price, col, label, o = {}) => {
+    const x0 = Math.max(0, X(t0) == null ? 0 : X(t0)), x1 = t1 == null ? right : Math.min(right, X(t1) == null ? right : X(t1)), y = Y(price);
+    if (y == null || x1 < 0 || x0 > right) return;
+    g.strokeStyle = col; g.lineWidth = o.w || 1; g.setLineDash(o.dash || []);
+    g.beginPath(); g.moveTo(x0, y); g.lineTo(x1, y); g.stroke(); g.setLineDash([]);
+    if (label) { g.fillStyle = col; g.textAlign = o.align === 'right' ? 'right' : 'center';
+      g.fillText(label, o.align === 'right' ? right - 6 : (x0 + x1) / 2, y + (o.dy == null ? -7 : o.dy)); }
+  };
+
+  if (L.sr) a.sr.forEach(s => hline(null, null, s.level, 'rgba(135,147,164,.55)', (s.kind === 'suporte' ? 'S ' : 'R ') + fmt(s.level), {dash: [2, 4], align: 'right'}));
+  if (L.fvg) a.fvgs.forEach(f => zone(f.t0, f.top, f.bottom, f.dir === 1 ? '#4da3ff' : '#ff9f43', 'FVG', {fill: .13, line: .5, dash: [3, 3]}));
+  if (L.ob) a.obs.forEach(o => {
+    const col = o.dir === 1 ? '#26c281' : '#ef5350', brk = o.kind === 'BREAKER';
+    const isPlan = a.plan && Math.abs(a.plan.top - o.top) < 1e-6 && Math.abs(a.plan.bottom - o.bottom) < 1e-6;
+    zone(o.t0, o.top, o.bottom, col, (brk ? 'BREAKER ' : 'OB ') + (o.dir === 1 ? '↑' : '↓') + (o.status === 'testado' ? ' (testado)' : ''),
+      {fill: isPlan ? .26 : .14, line: isPlan ? 1 : .7, w: isPlan ? 2 : 1, dash: brk ? [5, 3] : []});
+  });
+  if (L.liq) {
+    a.liquidity.eq_highs.forEach(l => hline(l.t0, null, l.level, '#ffd166', 'EQH · liquidez', {dash: [6, 4], dy: -7}));
+    a.liquidity.eq_lows.forEach(l => hline(l.t0, null, l.level, '#ffd166', 'EQL · liquidez', {dash: [6, 4], dy: 9}));
+    a.liquidity.sweeps.forEach(s => {
+      const x = X(s.time), y = Y(s.level); if (x == null || y == null) return;
+      g.fillStyle = '#ffd166'; g.beginPath(); g.moveTo(x, y - 5); g.lineTo(x + 5, y); g.lineTo(x, y + 5); g.lineTo(x - 5, y); g.closePath(); g.fill();
+      g.textAlign = 'center'; g.fillText('SWEEP', x, y + (s.dir === 1 ? 15 : -14));
+    });
+  }
+  if (L.estrutura) {
+    a.events.forEach(e => {
+      const choch = e.kind === 'CHOCH', col = choch ? C.amb : (e.dir === 1 ? C.up : C.dn);
+      hline(e.t0, e.t1, e.level, col, choch ? 'CHoCH' : 'BOS', {w: choch ? 1.6 : 1, dash: choch ? [] : [5, 4], dy: e.dir === 1 ? -7 : 9});
+    });
+    g.fillStyle = 'rgba(217,224,234,.7)'; g.textAlign = 'center';
+    a.swings.forEach(s => {
+      const x = X(s.time), y = Y(s.price); if (x == null || y == null || !s.label || s.label.length < 2) return;
+      g.fillText(s.label, x, y + (s.type === 'H' ? -9 : 10));
+    });
+  }
+  if (L.plano && a.plan) {
+    const pz = a.plan; // destaca a zona do plano quando ela não está entre as OBs desenhadas
+    if (!a.obs.some(o => Math.abs(o.top - pz.top) < 1e-6 && Math.abs(o.bottom - pz.bottom) < 1e-6))
+      zone(pz.t0, pz.top, pz.bottom, pz.side === 1 ? '#26c281' : '#ef5350', pz.kind + ' ' + (pz.side === 1 ? '↑' : '↓'), {fill: .22, w: 2});
+  }
+}
+
+/* ============================== painel de detalhes ============================== */
+function layerChips() {
+  const defs = [['estrutura', 'Estrutura (BOS/CHoCH)', C.amb], ['ob', 'Order Blocks', C.up], ['fvg', 'FVG', C.acc],
+                ['liq', 'Liquidez', '#ffd166'], ['sr', 'Suporte/Resist.', C.mut], ['plano', 'Plano', C.acc], ['emas', 'EMA 50/200', '#b388ff']];
+  $('#layers').innerHTML = defs.map(([k, n, c]) => `<button class="chip${S.layers[k] ? ' on' : ''}" data-l="${k}" style="--c:${c}"><i></i>${n}</button>`).join('');
+}
+function trendTxt(t) { return t === 1 ? '<span class="up">alta</span>' : t === -1 ? '<span class="dn">baixa</span>' : '<span class="mut">indefinida</span>'; }
+
+function renderHead(a) {
+  $('#sTk').textContent = a.ticker; $('#sPx').textContent = 'R$ ' + fmt(a.price);
+  const ch = $('#sCh'); ch.textContent = (a.change_pct >= 0 ? '+' : '') + fmt(a.change_pct) + '%'; ch.className = 'num ' + (a.change_pct >= 0 ? 'up' : 'dn');
+  const d = $('#sDir'); d.textContent = a.direction === 1 ? '▲ COMPRA' : a.direction === -1 ? '▼ VENDA' : '● NEUTRO';
+  d.className = 'badge ' + (a.direction === 1 ? 'buy' : a.direction === -1 ? 'sell' : 'neu');
+  const r = $('#sRing'); r.style.setProperty('--v', a.score); r.style.setProperty('--c', a.score >= 80 ? C.up : a.score >= 65 ? C.acc : a.score >= 50 ? C.amb : C.mut);
+  $('#sScore').textContent = a.score; r.title = a.signal;
+}
+
+function renderPlan(a) {
+  const p = a.plan, side = p ? p.side : a.direction, buy = side === 1;
+  let html = '';
+  if (p) {
+    const pillCls = p.state === 'em_zona' ? 'zone' : p.state === 'invalidado' ? 'bad' : '';
+    const rows = p.tps.map((t, i) => `<dt>${t.name} <small>(${t.label})</small></dt><dd class="up">${fmt(t.level)} <small>· ${nf.format(t.rr)}R</small></dd>`).join('');
+    html += `<div class="card"><h3>Plano de ${buy ? 'compra' : 'venda'} <span class="pill ${pillCls}">${p.state_txt}</span></h3>
+      <dl class="kv">
+        <dt>Zona ${p.kind}</dt><dd>${fmt(p.bottom)} – ${fmt(p.top)} <small>· ${p.zone_status}</small></dd>
+        <dt>Entrada</dt><dd style="color:${C.acc}">${fmt(p.entry)}</dd>
+        <dt>Stop</dt><dd class="dn">${fmt(p.sl)} <small>· risco ${nf.format(p.risk_pct)}%</small></dd>${rows}
+        <dt>Risco/Retorno</dt><dd><b>${nf.format(p.rr)}</b></dd>
+      </dl>
+      <div class="tags"><span class="tag ${p.origin === 'CHOCH' ? 'on' : ''}">origem ${p.origin === 'CHOCH' ? 'CHoCH' : p.origin === 'BOS' ? 'BOS' : p.origin}</span>
+        <span class="tag ${p.fvg_confluence ? 'on' : ''}">FVG</span><span class="tag ${p.sweep_confluence ? 'on' : ''}">liquidez varrida</span>
+        <span class="tag ${p.in_discount ? 'on' : ''}">${buy ? 'desconto' : 'premium'}</span></div></div>`;
+    const cap = store.get('cap', 10000), rk = store.get('risk', 1);
+    html += `<div class="card"><h3>Tamanho da posição</h3>
+      <div class="calc"><label>Capital (R$)<input id="cCap" inputmode="decimal" value="${cap}"></label>
+      <label>Risco por trade (%)<input id="cRisk" inputmode="decimal" value="${rk}"></label></div>
+      <dl class="kv" id="calcOut"></dl></div>`;
+  } else {
+    html += `<div class="card"><h3>Plano <span class="pill">sem zona válida</span></h3>
+      <p class="mut" style="margin:0">Não há Order Block ou FVG utilizável a favor da estrutura agora. Aguarde um novo BOS/CHoCH e a formação de uma zona.</p></div>`;
+  }
+  html += `<div class="card"><h3>Leitura SMC</h3><ul class="ins">${a.insights.map(t => `<li class="${t.startsWith('⚠') ? 'warn' : ''}">${t.replace(/^⚠\s*/, '')}</li>`).join('')}</ul></div>`;
+  html += `<div class="card"><h3>Gestão / saída</h3><ul class="ins">${(a.manage.notas || []).map(t => `<li>${t}</li>`).join('') || '<li class="mut">—</li>'}</ul></div>`;
+  html += `<div class="card"><h3>Score ${a.direction_label.toLowerCase()} <span class="pill">${a.score} · ${a.signal}</span></h3><div class="bd">${a.breakdown.map(b =>
+    `<div title="${b.note}"><span>${b.name}</span><span class="bar"><s style="width:${b.pts / b.max * 100}%"></s></span><span>${b.pts}/${b.max}</span></div>`).join('')}</div>
+    <p class="mut" style="margin:10px 0 0;font-size:12px">Compra ${a.scores.compra} · Venda ${a.scores.venda} · Tempo maior: ${trendTxt(a.htf_trend)} · ATR ${nf.format(a.atr_pct)}% · RSI ${a.indicators.rsi} · ADX ${a.indicators.adx}</p></div>`;
+  $('#planpane').innerHTML = html;
+  if (p) { const f = () => calcPos(p); $('#cCap').oninput = $('#cRisk').oninput = f; f(); }
+}
+function calcPos(p) {
+  const num = s => parseFloat(String(s).replace(',', '.')) || 0;
+  const cap = num($('#cCap').value), rk = num($('#cRisk').value);
+  store.set('cap', cap); store.set('risk', rk);
+  const perShare = Math.abs(p.entry - p.sl), money = cap * rk / 100;
+  const qty = perShare > 0 ? Math.floor(money / perShare) : 0, lots = Math.floor(qty / 100) * 100;
+  $('#calcOut').innerHTML = `<dt>Risco em R$</dt><dd>${fmt(money)}</dd><dt>Quantidade</dt><dd>${qty} <small>ações</small></dd>
+    <dt>Em lotes de 100</dt><dd>${lots}</dd><dt>Valor da posição</dt><dd>R$ ${fmt(qty * p.entry)} <small>(${cap ? nf.format(qty * p.entry / cap * 100) : 0}% do capital)</small></dd>`;
+}
+
+async function select(t, goChart) {
+  S.sel = t; renderRows();
+  try {
+    const a = await getJSON(t + '_' + S.tf + '.json', S.ver);
+    if (S.sel !== t) return;
+    S.a = a;
+    $('#empty').hidden = true; $('#dbody').hidden = false;
+    renderHead(a); layerChips(); renderPlan(a);
+    if (goChart && mobile()) setPane('chart');
+    requestAnimationFrame(() => setChartData(a));
+  } catch (e) { toast('Falha ao carregar ' + t + ': ' + e.message); }
+}
+function setPane(p) {
+  $('#app').dataset.pane = p;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  if (p === 'chart') requestAnimationFrame(fit);
+}
+
+/* ============================== carga ============================== */
+async function loadAll(keepSel) {
+  try {
+    const meta = await getJSON('meta.json');
+    const changed = S.ver && S.ver !== meta.updated_at;
+    S.meta = meta; S.ver = meta.updated_at;
+    $('#meta').innerHTML = `<span class="full">Atualizado </span><span class="num">${meta.updated_brt}</span> <span class="full">(BRT) · ${meta.analyzed} ativos · ${meta.demo ? 'DADOS SIMULADOS' : 'Yahoo Finance'}</span>`;
+    banner(meta.demo ? '⚠ DADOS SIMULADOS — apenas demonstração. Não use para operar.' : '', false);
+    S.rows = await getJSON('scan_' + S.tf + '.json', S.ver);
+    renderRows();
+    if (keepSel && S.sel) { await select(S.sel, false); if (changed) toast('Dados atualizados'); }
+  } catch (e) {
+    $('#meta').textContent = 'sem dados';
+    const local = /^(localhost|127\.|192\.168\.|10\.)/.test(location.hostname);
+    const dica = local
+      ? 'No PC: feche a janela do servidor, rode <b>1_testar_simulado.bat</b> (ou <b>2_testar_dados_reais.bat</b>) e leia as mensagens. O <b>3_abrir_site.bat</b> só abre o site, não gera dados.'
+      : 'Rode o workflow “Atualizar dados e publicar” no GitHub (aba Actions → Run workflow).';
+    $('#rows').innerHTML = '<div class="empty">Os dados do scanner SMC ainda não foram gerados.<br>' + dica + '</div>';
+    banner('Não foi possível carregar os dados: ' + e.message, true);
+  }
+}
+
+document.addEventListener('click', e => {
+  const row = e.target.closest('.row'); if (row) return select(row.dataset.t, true);
+  const f = e.target.closest('#fseg button'); if (f) { S.filter = f.dataset.f; document.querySelectorAll('#fseg button').forEach(b => b.classList.toggle('on', b === f)); return renderRows(); }
+  const tf = e.target.closest('#tfseg button'); if (tf) { S.tf = tf.dataset.tf; store.set('tf', S.tf); document.querySelectorAll('#tfseg button').forEach(b => b.classList.toggle('on', b === tf)); return loadAll(true); }
+  const tb = e.target.closest('#tabs button'); if (tb) return setPane(tb.dataset.p);
+  const ch = e.target.closest('.chip'); if (ch) { const k = ch.dataset.l; S.layers[k] = !S.layers[k]; store.set('layers', S.layers); layerChips(); if (S.a) setChartData(S.a); sched(); }
+});
+$('#q').addEventListener('input', e => { S.q = e.target.value; renderRows(); });
+document.querySelectorAll('#tfseg button').forEach(b => b.classList.toggle('on', b.dataset.tf === S.tf));
+window.addEventListener('resize', fit);
+setInterval(() => { if (document.hidden) return; loadAll(true); }, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) return; if (S.ver) loadAll(true); });
+loadAll(false);
+</script>
+</body>
+</html>

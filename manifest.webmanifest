@@ -1,0 +1,10 @@
+{
+  "name": "Smc_B3 · Scanner SMC",
+  "short_name": "Smc_B3",
+  "description": "Scanner Smart Money Concept das ações mais líquidas da B3",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0b0e13",
+  "theme_color": "#0b0e13"
+}
