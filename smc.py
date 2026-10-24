@@ -21,9 +21,9 @@ import numpy as np
 import pandas as pd
 
 TF_PARAMS = {
-    "1d": {"swing": 4, "window": 320, "name": "diário"},
-    "1wk": {"swing": 3, "window": 220, "name": "semanal"},
-    "1h": {"swing": 5, "window": 400, "name": "60 min"},
+    "1d": {"swing": 4, "window": 320, "name": "diário", "max_age": 60},
+    "1wk": {"swing": 3, "window": 220, "name": "semanal", "max_age": 26},
+    "1h": {"swing": 5, "window": 400, "name": "60 min", "max_age": 120},
 }
 
 SL_BUFFER_ATR = 0.25      # folga do stop além da zona (em ATR)
@@ -378,7 +378,7 @@ def build_plan(side: int, c: dict):
         return None
 
     rg = c["range"]
-    best, best_q = None, -1e9
+    ranked = []
     for z in cands:
         fvg = any(g["dir"] == side and _overlap(z["top"], z["bottom"], g["top"], g["bottom"]) for g in c["fvgs"])
         sweep = any(s["dir"] == side and abs(s["level"] - (z["bottom"] if side == 1 else z["top"])) <= 3 * atr
@@ -390,17 +390,42 @@ def build_plan(side: int, c: dict):
         q = (2 if z["status"] == "ativo" else 1) + 2 * fvg + (1 if z["origin"] == "CHOCH" else 0) \
             + disc + sweep - 0.35 * dist - (3 if z["kind"] == "BREAKER" else 0) - (1 if z["kind"] == "FVG" else 0)
         z["_fvg"], z["_sweep"], z["_disc"], z["_dist"] = fvg, sweep, disc, dist
-        if q > best_q:
-            best, best_q = z, q
-    z = best
+        ranked.append((q, z))
+    ranked.sort(key=lambda x: -x[0])
 
-    if side == 1:
+    # Ciclo de vida: zonas cujo trade JÁ terminou (stop ou alvo final atingido) saem da análise.
+    for _, z in ranked:
+        plan = _plan_for_zone(side, z, c)
+        if plan is not None:
+            return plan
+    return None
+
+
+def _plan_for_zone(side: int, z: dict, c: dict):
+    """Monta o plano de uma zona e descobre em que fase ele está olhando os candles DEPOIS da formação da zona:
+       aguardar / em_zona  -> a entrada ainda não aconteceu;  andamento -> entrada acionada, alvo final ainda não;
+       None                -> o trade já terminou (stop ou alvo final atingido): descartado."""
+    price, atr, N = c["price"], c["atr"], c["N"]
+    H, L = c["H"], c["L"]
+    ref = z["top"] if side == 1 else z["bottom"]               # nível em que a ordem limite é executada
+    k0 = None
+    for j in range(int(z.get("created_i", z["i"])) + 1, N - 1):  # a última vela ainda conta como "em zona"
+        if (side == 1 and L[j] <= ref) or (side == -1 and H[j] >= ref):
+            k0 = j
+            break
+    triggered = k0 is not None
+
+    if triggered:
+        entry = ref
+    elif side == 1:
         entry = min(z["top"], price)
+    else:
+        entry = max(z["bottom"], price)
+    if side == 1:
         sl = z["bottom"] - SL_BUFFER_ATR * atr
         if entry - sl < MIN_RISK_ATR * atr:
             sl = entry - MIN_RISK_ATR * atr
     else:
-        entry = max(z["bottom"], price)
         sl = z["top"] + SL_BUFFER_ATR * atr
         if sl - entry < MIN_RISK_ATR * atr:
             sl = entry + MIN_RISK_ATR * atr
@@ -425,19 +450,52 @@ def build_plan(side: int, c: dict):
             tps.append({"level": float(entry + side * m * risk), "label": f"projeção {m:.1f}R", "rr": m})
     for k, t in enumerate(tps):
         t["name"] = f"Alvo {k + 1}"
-    rr_main = (tps[1] if len(tps) > 1 else tps[0])["rr"]
+    main_i = 1 if len(tps) > 1 else 0
+    rr_main = tps[main_i]["rr"]
+
+    hits, trig_i = [], None
+    if triggered:
+        trig_i = k0
+        for j in range(k0, N):                      # stop: vale já na vela da entrada (critério conservador)
+            if (side == 1 and L[j] <= sl) or (side == -1 and H[j] >= sl):
+                return None                         # trade já foi stopado -> sai da análise
+        for t in tps:
+            if any((H[j] >= t["level"]) if side == 1 else (L[j] <= t["level"]) for j in range(k0 + 1, N)):
+                hits.append(t["name"])
+        if tps[main_i]["name"] in hits:
+            return None                             # alvo final já atingido -> trade concluído, sai da análise
+        if N - 1 - k0 > c["max_age"]:
+            return None                             # trade aberto há tempo demais: deixou de ser uma leitura útil
+        for t in tps:
+            t["hit"] = t["name"] in hits
+
+    passou = ""
+    if not triggered:
+        lvl = tps[main_i]["level"]
+        j0 = int(z.get("created_i", z["i"])) + 1
+        if j0 < N and ((side == 1 and H[j0:].max() >= lvl) or (side == -1 and L[j0:].min() <= lvl)):
+            return None                 # o movimento já foi até o alvo final SEM tocar a entrada: oportunidade perdida
+        if j0 < N and ((side == 1 and H[j0:].max() >= tps[0]["level"]) or (side == -1 and L[j0:].min() <= tps[0]["level"])):
+            passou = " (o preço já passou do Alvo 1 sem tocar a entrada)"
 
     last_bull = c["C"][-1] > c["O"][-1]
-    if (side == 1 and price < sl) or (side == -1 and price > sl):
-        state, state_txt = "invalidado", "INVALIDADO — preço perdeu a zona"
+    if triggered:
+        state = "andamento"
+        dt = _fmt_t(c["times"][k0])
+        falta = [t["name"] for t in tps if t["name"] not in hits and t["rr"] <= rr_main + 1e-9]
+        txt = f"EM ANDAMENTO — entrada acionada em {dt}"
+        txt += (f"; {', '.join(hits)} atingido" + ("s" if len(hits) > 1 else "") + f"; falta {', '.join(falta)}"
+                if hits else "; nenhum alvo atingido ainda")
+    elif (side == 1 and price < sl) or (side == -1 and price > sl):
+        return None
     elif z["bottom"] <= price <= z["top"] or (side == 1 and price <= z["top"] * 1.003 and price >= z["bottom"]):
         react = (last_bull if side == 1 else not last_bull)
         state = "em_zona"
-        state_txt = "EM ZONA — candle de confirmação OK" if react else "EM ZONA — aguardar candle de confirmação"
+        txt = "EM ZONA — candle de confirmação OK" if react else "EM ZONA — aguardar candle de confirmação"
     else:
         d = abs(price - (z["top"] if side == 1 else z["bottom"])) / price * 100
         state = "aguardar"
-        state_txt = f"AGUARDAR {'RECUO' if side == 1 else 'SUBIDA'} — {d:.1f}% da zona"
+        txt = f"AGUARDAR {'RECUO' if side == 1 else 'SUBIDA'} — {d:.1f}% da zona{passou}"
 
     return {
         "side": side, "kind": z["kind"], "origin": z["origin"], "zone_status": z["status"],
@@ -446,8 +504,15 @@ def build_plan(side: int, c: dict):
         "tps": tps, "rr": float(rr_main),
         "fvg_confluence": bool(z["_fvg"]), "sweep_confluence": bool(z["_sweep"]),
         "in_discount": bool(z["_disc"]), "dist_atr": float(z["_dist"]),
-        "state": state, "state_txt": state_txt,
+        "state": state, "state_txt": txt,
+        "triggered": triggered, "trig_i": trig_i, "hits": hits,
     }
+
+
+def _fmt_t(t) -> str:
+    if isinstance(t, str) and len(t) >= 10 and t[4] == "-":
+        return f"{t[8:10]}/{t[5:7]}"
+    return str(t)
 
 
 # ----------------------------------------------------------------------------
@@ -547,6 +612,8 @@ def score_side(s: int, c: dict, plan):
         total = min(total, 45)
     elif plan["state"] == "invalidado":
         total = min(total, 30)
+    elif plan["state"] == "andamento":          # trade já em curso: não é mais uma entrada nova
+        total = min(total, 45 if plan["hits"] else 62)
     return int(round(min(100, total))), items
 
 
@@ -611,8 +678,9 @@ def analyze(df: pd.DataFrame, tf: str = "1d", htf_df: pd.DataFrame | None = None
     htf_trend = trend_only(htf_df) if htf_df is not None else None
 
     last = df.iloc[-1]
+    times = _times(df, tf)
     ctx = {
-        "N": N, "atr": atr_last, "price": price, "trend": trend, "htf_trend": htf_trend, "events": events,
+        "times": times, "max_age": p["max_age"], "N": N, "atr": atr_last, "price": price, "trend": trend, "htf_trend": htf_trend, "events": events,
         "obs": obs, "breakers": breakers, "fvgs": fvgs, "eq_highs": eq_h, "eq_lows": eq_l, "sweeps": sweeps,
         "sr": sr, "range": rg, "swings": swings,
         "H": df["High"].values, "L": df["Low"].values, "C": df["Close"].values, "O": df["Open"].values,
@@ -641,7 +709,6 @@ def analyze(df: pd.DataFrame, tf: str = "1d", htf_df: pd.DataFrame | None = None
     breakdown = br_l if direction == 1 else br_s if direction == -1 else (br_l if sc_l >= sc_s else br_s)
     state = plan["state"] if plan else "sem_plano"
 
-    times = _times(df, tf)
     T = lambda i: times[max(0, min(N - 1, int(i)))]
     W = min(p["window"], N)
     off = N - W
@@ -705,7 +772,13 @@ def analyze(df: pd.DataFrame, tf: str = "1d", htf_df: pd.DataFrame | None = None
         mg.append(f"Se VENDIDO: stop móvel no último topo (LH) {highs[-1]['price']:.2f}; saia se fechar acima "
                   f"ou se surgir CHoCH de alta.")
     if plan and plan["tps"]:
-        mg.append(f"Realize parcial no Alvo 1 ({plan['tps'][0]['level']:.2f}) e mova o stop para a entrada.")
+        if plan.get("hits"):
+            mg.append(f"{', '.join(plan['hits'])} já atingido(s): não é entrada nova. Se estiver posicionado, "
+                      f"mantenha o stop na entrada ({plan['entry']:.2f}) ou no stop móvel.")
+        elif plan.get("triggered"):
+            mg.append("Entrada já acionada: acompanhe o trade; não abra nova posição só por este plano.")
+        else:
+            mg.append(f"Realize parcial no Alvo 1 ({plan['tps'][0]['level']:.2f}) e mova o stop para a entrada.")
     manage["notas"] = mg
 
     # ---- serialização ----
@@ -764,9 +837,12 @@ def analyze(df: pd.DataFrame, tf: str = "1d", htf_df: pd.DataFrame | None = None
             "side": plan["side"], "kind": plan["kind"], "origin": plan["origin"], "zone_status": plan["zone_status"],
             "top": _f(plan["top"]), "bottom": _f(plan["bottom"]), "t0": T(plan["i0"]),
             "entry": _f(plan["entry"]), "sl": _f(plan["sl"]), "risk_pct": _f(plan["risk_pct"]),
-            "tps": [{"name": t["name"], "level": _f(t["level"]), "rr": _f(t["rr"], 1), "label": t["label"]} for t in plan["tps"]],
+            "tps": [{"name": t["name"], "level": _f(t["level"]), "rr": _f(t["rr"], 1), "label": t["label"],
+                     "hit": bool(t.get("hit"))} for t in plan["tps"]],
             "rr": _f(plan["rr"], 1), "fvg_confluence": plan["fvg_confluence"], "sweep_confluence": plan["sweep_confluence"],
             "in_discount": plan["in_discount"], "state": plan["state"], "state_txt": plan["state_txt"],
+            "triggered": plan["triggered"], "trig_t": T(plan["trig_i"]) if plan["trig_i"] is not None else None,
+            "hits": plan["hits"],
         }
     return out
 

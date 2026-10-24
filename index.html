@@ -35,6 +35,7 @@ header{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
 .seg button{background:transparent;border:0;padding:6px 11px;color:var(--mut);font-size:13px}
 .seg button.on{background:var(--panel2);color:var(--txt);box-shadow:inset 0 -2px 0 var(--acc)}
+.pill.run,.st.run{color:#8ab4ff}
 .banner{background:#3a2a05;color:#ffd27a;text-align:center;font-size:12px;padding:5px 10px;border-bottom:1px solid #5a4210}
 .banner.err{background:#3a1212;color:#ffb4b4;border-color:#5a2020}
 .toast{position:fixed;left:50%;bottom:76px;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--line);
@@ -204,6 +205,7 @@ function applyBanner() {
 /* ============================== ranking ============================== */
 function stateInfo(r) {
   if (r.state === 'em_zona') return {txt: 'EM ZONA · ' + (r.direction === 1 ? 'comprar' : 'vender'), cls: 'zone'};
+  if (r.state === 'andamento') return {txt: r.state_txt.replace('EM ANDAMENTO — ', 'Em andamento · ').replace('entrada acionada em', 'entrou'), cls: 'run'};
   if (r.state === 'invalidado') return {txt: 'Invalidado', cls: ''};
   if (r.state === 'aguardar') return {txt: r.state_txt.replace('AGUARDAR ', 'Aguardar ').toLowerCase().replace(/^./, c => c.toUpperCase()), cls: ''};
   return {txt: 'Sem zona válida', cls: ''};
@@ -272,9 +274,9 @@ function setChartData(a) {
   const p = a.plan;
   if (p && S.layers.plano) {
     const add = (price, color, title, style) => priceLines.push(series.createPriceLine({price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title}));
-    add(p.entry, C.acc, 'ENTRADA', 0);
-    add(p.sl, C.dn, 'STOP', 0);
-    p.tps.forEach((t, i) => add(t.level, C.up, 'ALVO ' + (i + 1), 2));
+    add(p.entry, C.acc, p.triggered ? 'ENTRADA ✓' : 'ENTRADA', p.triggered ? 2 : 0);
+    add(p.sl, C.dn, p.hits && p.hits.length ? 'STOP → entrada' : 'STOP', 0);
+    p.tps.forEach((t, i) => add(t.level, t.hit ? C.mut : C.up, 'ALVO ' + (i + 1) + (t.hit ? ' ✓' : ''), t.hit ? 3 : 2));
   }
   const n = a.candles.length;
   chart.timeScale().setVisibleLogicalRange({from: Math.max(0, n - (mobile() ? 70 : 130)), to: n + 8});
@@ -371,15 +373,15 @@ function renderPlan(a) {
   const p = a.plan, side = p ? p.side : a.direction, buy = side === 1;
   let html = '';
   if (p) {
-    const pillCls = p.state === 'em_zona' ? 'zone' : p.state === 'invalidado' ? 'bad' : '';
-    const rows = p.tps.map((t, i) => `<dt>${t.name} <small>(${t.label})</small></dt><dd class="up">${fmt(t.level)} <small>· ${nf.format(t.rr)}R</small></dd>`).join('');
-    html += `<div class="card"><h3>Plano de ${buy ? 'compra' : 'venda'} <span class="pill ${pillCls}">${p.state_txt}</span></h3>
+    const pillCls = p.state === 'em_zona' ? 'zone' : p.state === 'andamento' ? 'run' : p.state === 'invalidado' ? 'bad' : '';
+    const rows = p.tps.map((t, i) => `<dt>${t.name} <small>(${t.label})</small></dt><dd class="${t.hit ? 'mut' : 'up'}">${fmt(t.level)} <small>· ${nf.format(t.rr)}R${t.hit ? ' · ✓ já atingido' : ''}</small></dd>`).join('');
+    html += `<div class="card"><h3>${p.triggered ? 'Trade' : 'Plano'} de ${buy ? 'compra' : 'venda'} <span class="pill ${pillCls}">${p.state_txt}</span></h3>
       <dl class="kv">
         <dt>Zona ${p.kind}</dt><dd>${fmt(p.bottom)} – ${fmt(p.top)} <small>· ${p.zone_status}</small></dd>
-        <dt>Entrada</dt><dd style="color:${C.acc}">${fmt(p.entry)}</dd>
+        <dt>Entrada</dt><dd style="color:${C.acc}">${fmt(p.entry)}${p.triggered ? ' <small>· ✓ acionada em ' + p.trig_t.slice(8, 10) + '/' + p.trig_t.slice(5, 7) + '</small>' : ''}</dd>
         <dt>Stop</dt><dd class="dn">${fmt(p.sl)} <small>· risco ${nf.format(p.risk_pct)}%</small></dd>${rows}
         <dt>Risco/Retorno</dt><dd><b>${nf.format(p.rr)}</b></dd>
-      </dl>
+      </dl>${p.triggered ? '<p class="mut" style="margin:8px 0 0;font-size:12px">A entrada deste plano já aconteceu: <b>não é uma entrada nova</b>. Os níveis marcados com ✓ já foram atingidos.</p>' : ''}
       <div class="tags"><span class="tag ${p.origin === 'CHOCH' ? 'on' : ''}">origem ${p.origin === 'CHOCH' ? 'CHoCH' : p.origin === 'BOS' ? 'BOS' : p.origin}</span>
         <span class="tag ${p.fvg_confluence ? 'on' : ''}">FVG</span><span class="tag ${p.sweep_confluence ? 'on' : ''}">liquidez varrida</span>
         <span class="tag ${p.in_discount ? 'on' : ''}">${buy ? 'desconto' : 'premium'}</span></div></div>`;
@@ -389,8 +391,8 @@ function renderPlan(a) {
       <label>Risco por trade (%)<input id="cRisk" inputmode="decimal" value="${rk}"></label></div>
       <dl class="kv" id="calcOut"></dl></div>`;
   } else {
-    html += `<div class="card"><h3>Plano <span class="pill">sem zona válida</span></h3>
-      <p class="mut" style="margin:0">Não há Order Block ou FVG utilizável a favor da estrutura agora. Aguarde um novo BOS/CHoCH e a formação de uma zona.</p></div>`;
+    html += `<div class="card"><h3>Plano <span class="pill">sem plano ativo</span></h3>
+      <p class="mut" style="margin:0">Não há zona pendente: os setups anteriores já foram concluídos (alvo atingido), stopados ou perdidos (o preço andou sem tocar a entrada). Aguarde um novo BOS/CHoCH e a formação de uma nova zona.</p></div>`;
   }
   html += `<div class="card"><h3>Leitura SMC</h3><ul class="ins">${a.insights.map(t => `<li class="${t.startsWith('⚠') ? 'warn' : ''}">${t.replace(/^⚠\s*/, '')}</li>`).join('')}</ul></div>`;
   html += `<div class="card"><h3>Gestão / saída</h3><ul class="ins">${(a.manage.notas || []).map(t => `<li>${t}</li>`).join('') || '<li class="mut">—</li>'}</ul></div>`;
